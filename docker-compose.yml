@@ -1,0 +1,59 @@
+version: '3.7'
+services:
+  backend:
+    container_name: backend
+    build:
+      context: app
+      dockerfile: Dockerfile
+    command: uvicorn main:app --reload --host 0.0.0.0 --port 8888 --workers 4
+    restart: always
+    tty: true
+    volumes:
+      - ./app:/app/:cached
+    ports:
+      - "8888:8888"
+    environment:
+      PYTHONPATH: .
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+
+  redis:
+    container_name: redis
+    restart: always
+    image: redis:7
+
+  worker:
+    container_name: worker
+    restart: always
+    build:
+      context: app
+      dockerfile: Dockerfile
+    tty: true
+    # command: celery -A worker.celery worker --loglevel=info -c 4
+    # command: celery multi start 4 -A worker.celery -c 1 -l info
+    command: /bin/sh -c 'celery multi start 4 -A worker.celery -c 1 -l info; while true; do sleep 2; done;'
+    volumes:
+      - ./app:/usr/src/app
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
+
+  dashboard:
+    container_name: dashboard
+    restart: always
+    build:
+      context: app
+      dockerfile: Dockerfile
+    command: celery --broker=redis://redis:6379/0 flower --port=5555
+    ports:
+      - 5556:5555
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - backend
+      - redis
+      - worker
